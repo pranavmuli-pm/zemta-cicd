@@ -1,0 +1,28 @@
+{
+  "application": "ZEMTA",
+  "version": "v-test-1",
+  "mode": "dry-run",
+
+  "targets": [
+    {
+      "host": "13.201.73.0",
+      "user": "rocky"
+    }
+  ],
+
+  "artifacts": {
+    "release_path": "/deployments/release/ZEmTA/v-test-1",
+    "mta_core": "MTA-test-1.tar.gz",
+    "mta_et": "MTA-ET-test-1.tar.gz",
+    "ui": "mta-admin.zip"
+  },
+
+  "steps": {
+    "backup": true,
+    "deploy_core": true,
+    "deploy_et": true,
+    "deploy_ui": true,
+    "restart_services": false
+  }
+}
+
