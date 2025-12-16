@@ -1,0 +1,102 @@
+{
+  "application": "ZEMTA",
+  "version": "3.0.3",
+  "release_type": "upgrade",
+  "mode": "doc-driven",
+
+  "artifacts": {
+    "source": "release-server",
+    "release_server": {
+      "host": "zemta-build",
+      "path": "/deployments/release/ZEmTA/v3.0.3"
+    },
+    "files": {
+      "mta_core": "MTA-3.0.3.tar.gz",
+      "mta_et": "MTA-ET-3.0.3.tar.gz",
+      "admin_ui": "mta-admin.zip"
+    }
+  },
+
+  "targets": {
+
+    "mta_core": [
+      {
+        "host": "zemta-target",
+        "user": "rocky"
+      }
+    ],
+
+    "mta_et": [
+      {
+        "host": "zemta-target",
+        "user": "rocky"
+      }
+    ],
+
+    "admin_ui": [
+      {
+        "host": "zemta-target",
+        "user": "rocky"
+      }
+    ]
+  },
+
+  "node_groups": {
+
+    "mta_core_nodes": {
+      "description": "MTA Core Services Nodes",
+      "deployment_order": "rolling",
+      "steps": [
+        "connect_node",
+        "backup_existing_jars",
+        "extract_mta_core",
+        "update_admin_properties",
+        "restart_mta_admin_service",
+        "restart_mta_service",
+        "verify_mta_logs"
+      ]
+    },
+
+    "mta_et_nodes": {
+      "description": "MTA ET Services Nodes",
+      "deployment_order": "rolling",
+      "steps": [
+        "connect_node",
+        "backup_et_jars",
+        "extract_mta_et",
+        "restart_mta_admin_service",
+        "restart_mta_service",
+        "restart_event_processor",
+        "verify_et_logs"
+      ]
+    },
+
+    "admin_ui_node": {
+      "description": "MTA Admin UI Node",
+      "deployment_order": "single",
+      "steps": [
+        "connect_node",
+        "backup_admin_ui",
+        "remove_existing_ui",
+        "deploy_new_ui",
+        "restart_apache",
+        "verify_ui"
+      ]
+    }
+  },
+
+  "rollback": {
+    "supported": true,
+    "strategy": "restore_from_backup_and_restart_services"
+  },
+
+  "verification": {
+    "required": true,
+    "methods": [
+      "service_status",
+      "log_check",
+      "ui_access"
+    ]
+  }
+}
+
