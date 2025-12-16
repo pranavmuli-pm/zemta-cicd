@@ -1,6 +1,11 @@
 pipeline {
   agent any
 
+  environment {
+    BACKUP_BASE = "/u1/backups/zemta"
+    TIMESTAMP = sh(script: "date +%Y%m%d_%H%M%S", returnStdout: true).trim()
+  }
+
   stages {
 
     stage('Checkout') {
@@ -12,52 +17,65 @@ pipeline {
     stage('Read Manifest') {
       steps {
         sh '''
-          echo "========== RELEASE MANIFEST =========="
+          echo "========== MANIFEST =========="
           jq . manifests/release_manifest_3.0.3.json
         '''
       }
     }
 
-    stage('Execution Plan (DRY RUN)') {
+    stage('Backup - MTA Core Nodes') {
       steps {
         sh '''
-          echo "========== EXECUTION PLAN =========="
+          TARGETS=$(jq -r '.targets.mta_core[].host' manifests/release_manifest_3.0.3.json)
 
-          echo ""
-          echo "Release Server:"
-          jq -r '.artifacts.release_server.host + " -> " + .artifacts.release_server.path' \
-            manifests/release_manifest_3.0.3.json
+          for host in $TARGETS; do
+            echo "Backing up MTA Core on $host"
 
-          echo ""
-          echo "------------------------------------"
-          echo "MTA CORE NODES"
-          jq -r '.targets.mta_core[].host' manifests/release_manifest_3.0.3.json | while read host; do
-            echo " Node: $host"
-            jq -r '.node_groups.mta_core_nodes.steps[]' \
-              manifests/release_manifest_3.0.3.json | sed 's/^/   - /'
+            ssh rocky@$host "
+              mkdir -p ${BACKUP_BASE}/${TIMESTAMP}/mta_core
+              tar -czvf ${BACKUP_BASE}/${TIMESTAMP}/mta_core/mta_core_backup.tar.gz \
+                /u1/zemta/zemta-admin-*.jar \
+                /u1/zemta/lib/james-server-protocols-smtp-*.jar
+            "
           done
+        '''
+      }
+    }
 
-          echo ""
-          echo "------------------------------------"
-          echo "MTA ET NODES"
-          jq -r '.targets.mta_et[].host' manifests/release_manifest_3.0.3.json | while read host; do
-            echo " Node: $host"
-            jq -r '.node_groups.mta_et_nodes.steps[]' \
-              manifests/release_manifest_3.0.3.json | sed 's/^/   - /'
+    stage('Backup - MTA ET Nodes') {
+      steps {
+        sh '''
+          TARGETS=$(jq -r '.targets.mta_et[].host' manifests/release_manifest_3.0.3.json)
+
+          for host in $TARGETS; do
+            echo "Backing up MTA ET on $host"
+
+            ssh rocky@$host "
+              mkdir -p ${BACKUP_BASE}/${TIMESTAMP}/mta_et
+              tar -czvf ${BACKUP_BASE}/${TIMESTAMP}/mta_et/mta_et_backup.tar.gz \
+                /u1/zemta-inbound-email-server/zemta-admin-*.jar \
+                /u1/zemta-inbound-email-server/lib/james-server-protocols-smtp-*.jar \
+                /u1/zemta-eventserver/lib/mta-event-processor-*.jar
+            "
           done
+        '''
+      }
+    }
 
-          echo ""
-          echo "------------------------------------"
-          echo "ADMIN UI NODE"
-          jq -r '.targets.admin_ui[].host' manifests/release_manifest_3.0.3.json | while read host; do
-            echo " Node: $host"
-            jq -r '.node_groups.admin_ui_node.steps[]' \
-              manifests/release_manifest_3.0.3.json | sed 's/^/   - /'
+    stage('Backup - Admin UI') {
+      steps {
+        sh '''
+          TARGETS=$(jq -r '.targets.admin_ui[].host' manifests/release_manifest_3.0.3.json)
+
+          for host in $TARGETS; do
+            echo "Backing up Admin UI on $host"
+
+            ssh rocky@$host "
+              mkdir -p ${BACKUP_BASE}/${TIMESTAMP}/ui
+              tar -czvf ${BACKUP_BASE}/${TIMESTAMP}/ui/ui_backup.tar.gz \
+                /var/www/html/mta-admin
+            "
           done
-
-          echo ""
-          echo "========== DRY RUN COMPLETE =========="
-          echo "No commands executed on servers"
         '''
       }
     }
@@ -65,10 +83,10 @@ pipeline {
 
   post {
     success {
-      echo "✅ Manifest execution plan generated successfully"
+      echo "✅ Backup completed successfully"
     }
     failure {
-      echo "❌ Failed to generate execution plan"
+      echo "❌ Backup failed — deployment stopped"
     }
   }
 }
