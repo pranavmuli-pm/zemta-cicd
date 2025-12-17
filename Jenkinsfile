@@ -2,43 +2,36 @@ pipeline {
   agent any
 
   environment {
-    BACKUP_BASE = "/u1/backups/zemta"
-    TIMESTAMP = sh(script: "date +%Y%m%d_%H%M%S", returnStdout: true).trim()
+    BACKUP_DIR = "/u1/backups"
+    BACKUP_DATE = sh(script: "date +%Y-%m-%d", returnStdout: true).trim()
   }
 
   stages {
 
-    stage('Checkout') {
-      steps {
-        echo "Code checked out from GitHub"
-      }
-    }
-
     stage('Read Manifest') {
       steps {
         sh '''
-          echo "========== MANIFEST =========="
+          echo "========== ZEMTA MANIFEST =========="
           jq . manifests/release_manifest_3.0.3.json
         '''
       }
     }
 
-    stage('Backup - MTA Core Nodes') {
+    stage('Backup - MTA Nodes') {
       steps {
         sh '''
+          VERSION=$(jq -r '.version' manifests/release_manifest_3.0.3.json)
           TARGETS=$(jq -r '.targets.mta_core[].host' manifests/release_manifest_3.0.3.json)
 
           for host in $TARGETS; do
-            echo "Backing up MTA Core on $host"
+            echo "Backing up MTA on $host"
 
             ssh rocky@$host "
-              sudo mkdir -p ${BACKUP_BASE}/${TIMESTAMP}/mta_core
-
               if ls /u1/zemta/*.jar 1>/dev/null 2>&1; then
-                sudo tar -czvf ${BACKUP_BASE}/${TIMESTAMP}/mta_core/mta_core_backup.tar.gz \
+                sudo tar -czvf ${BACKUP_DIR}/MTA${VERSION}_BKP_${BACKUP_DATE}.tar.gz \
                   /u1/zemta/*.jar
               else
-                echo '[WARN] No MTA Core JARs found, skipping backup'
+                echo '[WARN] No MTA JARs found on '${host}', skipping'
               fi
             "
           done
@@ -46,22 +39,21 @@ pipeline {
       }
     }
 
-    stage('Backup - MTA ET Nodes') {
+    stage('Backup - ET Nodes') {
       steps {
         sh '''
+          VERSION=$(jq -r '.version' manifests/release_manifest_3.0.3.json)
           TARGETS=$(jq -r '.targets.mta_et[].host' manifests/release_manifest_3.0.3.json)
 
           for host in $TARGETS; do
-            echo "Backing up MTA ET on $host"
+            echo "Backing up ET on $host"
 
             ssh rocky@$host "
-              sudo mkdir -p ${BACKUP_BASE}/${TIMESTAMP}/mta_et
-
               if ls /u1/zemta-inbound-email-server/*.jar 1>/dev/null 2>&1; then
-                sudo tar -czvf ${BACKUP_BASE}/${TIMESTAMP}/mta_et/mta_et_backup.tar.gz \
+                sudo tar -czvf ${BACKUP_DIR}/MTA-ET${VERSION}_BKP_${BACKUP_DATE}.tar.gz \
                   /u1/zemta-inbound-email-server/*.jar
               else
-                echo '[WARN] No MTA ET JARs found, skipping backup'
+                echo '[WARN] No ET JARs found on '${host}', skipping'
               fi
             "
           done
@@ -69,22 +61,21 @@ pipeline {
       }
     }
 
-    stage('Backup - Admin UI') {
+    stage('Backup - Admin UI Node') {
       steps {
         sh '''
+          VERSION=$(jq -r '.version' manifests/release_manifest_3.0.3.json)
           TARGETS=$(jq -r '.targets.admin_ui[].host' manifests/release_manifest_3.0.3.json)
 
           for host in $TARGETS; do
             echo "Backing up Admin UI on $host"
 
             ssh rocky@$host "
-              sudo mkdir -p ${BACKUP_BASE}/${TIMESTAMP}/ui
-
               if [ -d /var/www/html/mta-admin ]; then
-                sudo tar -czvf ${BACKUP_BASE}/${TIMESTAMP}/ui/ui_backup.tar.gz \
+                sudo tar -czvf ${BACKUP_DIR}/MTA-UI${VERSION}_BKP_${BACKUP_DATE}.tar.gz \
                   /var/www/html/mta-admin
               else
-                echo '[WARN] Admin UI directory not found, skipping backup'
+                echo '[WARN] Admin UI not found on '${host}', skipping'
               fi
             "
           done
@@ -95,10 +86,10 @@ pipeline {
 
   post {
     success {
-      echo "✅ Backup completed successfully (tolerant mode)"
+      echo "✅ ZEMTA backups completed successfully (production-style)"
     }
     failure {
-      echo "❌ Backup failed — pipeline stopped"
+      echo "❌ Backup failed — deployment stopped"
     }
   }
 }
