@@ -32,10 +32,14 @@ pipeline {
             echo "Backing up MTA Core on $host"
 
             ssh rocky@$host "
-              mkdir -p ${BACKUP_BASE}/${TIMESTAMP}/mta_core
-              tar -czvf ${BACKUP_BASE}/${TIMESTAMP}/mta_core/mta_core_backup.tar.gz \
-                /u1/zemta/zemta-admin-*.jar \
-                /u1/zemta/lib/james-server-protocols-smtp-*.jar
+              sudo mkdir -p ${BACKUP_BASE}/${TIMESTAMP}/mta_core
+
+              if ls /u1/zemta/*.jar 1>/dev/null 2>&1; then
+                sudo tar -czvf ${BACKUP_BASE}/${TIMESTAMP}/mta_core/mta_core_backup.tar.gz \
+                  /u1/zemta/*.jar
+              else
+                echo '[WARN] No MTA Core JARs found, skipping backup'
+              fi
             "
           done
         '''
@@ -51,11 +55,14 @@ pipeline {
             echo "Backing up MTA ET on $host"
 
             ssh rocky@$host "
-              mkdir -p ${BACKUP_BASE}/${TIMESTAMP}/mta_et
-              tar -czvf ${BACKUP_BASE}/${TIMESTAMP}/mta_et/mta_et_backup.tar.gz \
-                /u1/zemta-inbound-email-server/zemta-admin-*.jar \
-                /u1/zemta-inbound-email-server/lib/james-server-protocols-smtp-*.jar \
-                /u1/zemta-eventserver/lib/mta-event-processor-*.jar
+              sudo mkdir -p ${BACKUP_BASE}/${TIMESTAMP}/mta_et
+
+              if ls /u1/zemta-inbound-email-server/*.jar 1>/dev/null 2>&1; then
+                sudo tar -czvf ${BACKUP_BASE}/${TIMESTAMP}/mta_et/mta_et_backup.tar.gz \
+                  /u1/zemta-inbound-email-server/*.jar
+              else
+                echo '[WARN] No MTA ET JARs found, skipping backup'
+              fi
             "
           done
         '''
@@ -71,9 +78,14 @@ pipeline {
             echo "Backing up Admin UI on $host"
 
             ssh rocky@$host "
-              mkdir -p ${BACKUP_BASE}/${TIMESTAMP}/ui
-              tar -czvf ${BACKUP_BASE}/${TIMESTAMP}/ui/ui_backup.tar.gz \
-                /var/www/html/mta-admin
+              sudo mkdir -p ${BACKUP_BASE}/${TIMESTAMP}/ui
+
+              if [ -d /var/www/html/mta-admin ]; then
+                sudo tar -czvf ${BACKUP_BASE}/${TIMESTAMP}/ui/ui_backup.tar.gz \
+                  /var/www/html/mta-admin
+              else
+                echo '[WARN] Admin UI directory not found, skipping backup'
+              fi
             "
           done
         '''
@@ -83,10 +95,10 @@ pipeline {
 
   post {
     success {
-      echo "✅ Backup completed successfully"
+      echo "✅ Backup completed successfully (tolerant mode)"
     }
     failure {
-      echo "❌ Backup failed — deployment stopped"
+      echo "❌ Backup failed — pipeline stopped"
     }
   }
 }
