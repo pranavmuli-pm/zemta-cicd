@@ -17,6 +17,43 @@ pipeline {
       }
     }
 
+    stage('Validate Release Artifacts') {
+  steps {
+    sh '''
+      RELEASE_HOST=$(jq -r '.artifacts.release_server.host' manifests/release_manifest_3.0.3.json)
+      RELEASE_PATH=$(jq -r '.artifacts.release_server.path' manifests/release_manifest_3.0.3.json)
+
+      MTA_CORE=$(jq -r '.artifacts.files.mta_core' manifests/release_manifest_3.0.3.json)
+      MTA_ET=$(jq -r '.artifacts.files.mta_et' manifests/release_manifest_3.0.3.json)
+      UI_ZIP=$(jq -r '.artifacts.files.admin_ui' manifests/release_manifest_3.0.3.json)
+
+      echo "Validating artifacts on $RELEASE_HOST:$RELEASE_PATH"
+
+      ssh rocky@$RELEASE_HOST "
+        set -e
+
+        for file in $MTA_CORE $MTA_ET $UI_ZIP; do
+          FULL_PATH=$RELEASE_PATH/\$file
+
+          if [ ! -f \$FULL_PATH ]; then
+            echo '[ERROR] Missing artifact:' \$FULL_PATH
+            exit 1
+          fi
+
+          SIZE=\$(stat -c%s \$FULL_PATH)
+          if [ \$SIZE -le 0 ]; then
+            echo '[ERROR] Empty artifact:' \$FULL_PATH
+            exit 1
+          fi
+
+          echo '[OK]' \$file 'exists, size=' \$SIZE
+        done
+      "
+    '''
+  }
+}
+
+
     stage('Backup - MTA Nodes') {
       steps {
         sh '''
