@@ -29,30 +29,41 @@ pipeline {
 
           echo "Validating artifacts on ${RELEASE_HOST}:${RELEASE_PATH}"
 
-          ssh rocky@${RELEASE_HOST} << EOF
-set -e
+          ssh rocky@${RELEASE_HOST} bash -s -- \
+            "${RELEASE_PATH}" \
+            "${MTA_CORE}" \
+            "${MTA_ET}" \
+            "${UI_ZIP}" << 'EOF'
 
-check_file() {
-  FILE="\$1"
-  FULL_PATH="${RELEASE_PATH}/\$FILE"
+          set -e
 
-  if [ ! -f "\$FULL_PATH" ]; then
-    echo "[ERROR] Missing artifact: \$FULL_PATH"
-    exit 1
-  fi
+          RELEASE_PATH="$1"
+          MTA_CORE="$2"
+          MTA_ET="$3"
+          UI_ZIP="$4"
 
-  SIZE=\$(stat -c%s "\$FULL_PATH")
-  if [ "\$SIZE" -le 0 ]; then
-    echo "[ERROR] Empty artifact: \$FULL_PATH"
-    exit 1
-  fi
+          check_file () {
+            FILE="$1"
+            FULL_PATH="${RELEASE_PATH}/${FILE}"
 
-  echo "[OK] \$FILE exists, size=\$SIZE"
-}
+            if [ ! -f "$FULL_PATH" ]; then
+              echo "[ERROR] Missing artifact: $FULL_PATH"
+              exit 1
+            fi
 
-check_file "${MTA_CORE}"
-check_file "${MTA_ET}"
-check_file "${UI_ZIP}"
+            SIZE=$(stat -c%s "$FULL_PATH")
+            if [ "$SIZE" -le 0 ]; then
+              echo "[ERROR] Empty artifact: $FULL_PATH"
+              exit 1
+            fi
+
+            echo "[OK] $FILE exists, size=$SIZE"
+          }
+
+          check_file "$MTA_CORE"
+          check_file "$MTA_ET"
+          check_file "$UI_ZIP"
+
 EOF
         '''
       }
