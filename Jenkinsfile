@@ -2,9 +2,7 @@ pipeline {
   agent any
 
   environment {
-    BACKUP_DIR  = "/u1/backups"
     STAGING_DIR = "/u1/staging/ZEMTA"
-    BACKUP_DATE = sh(script: "date +%Y-%m-%d", returnStdout: true).trim()
   }
 
   stages {
@@ -24,12 +22,14 @@ pipeline {
           RELEASE_HOST=$(jq -r '.artifacts.release_server.host' manifests/release_manifest_3.0.3.json)
           RELEASE_PATH=$(jq -r '.artifacts.release_server.path' manifests/release_manifest_3.0.3.json)
 
-          FILES=$(jq -r '.artifacts.files | .mta_core, .mta_et, .admin_ui' manifests/release_manifest_3.0.3.json)
+          MTA_CORE=$(jq -r '.artifacts.files.mta_core' manifests/release_manifest_3.0.3.json)
+          MTA_ET=$(jq -r '.artifacts.files.mta_et' manifests/release_manifest_3.0.3.json)
+          UI_ZIP=$(jq -r '.artifacts.files.admin_ui' manifests/release_manifest_3.0.3.json)
 
-          ssh rocky@${RELEASE_HOST} bash -s -- "${RELEASE_PATH}" ${FILES} << 'EOF'
+          ssh rocky@${RELEASE_HOST} bash -s -- \
+            "${RELEASE_PATH}" "${MTA_CORE}" "${MTA_ET}" "${UI_ZIP}" << 'EOF'
           set -e
-          RELEASE_PATH="$1"
-          shift
+          RELEASE_PATH="$1"; shift
 
           for file in "$@"; do
             FULL="${RELEASE_PATH}/${file}"
@@ -43,34 +43,82 @@ EOF
       }
     }
 
-    stage('Copy Artifacts to Target Nodes (DRY RUN)') {
+    stage('Copy MTA Artifacts (MTA Nodes Only)') {
       steps {
         sh '''
           VERSION=$(jq -r '.version' manifests/release_manifest_3.0.3.json)
           RELEASE_HOST=$(jq -r '.artifacts.release_server.host' manifests/release_manifest_3.0.3.json)
           RELEASE_PATH=$(jq -r '.artifacts.release_server.path' manifests/release_manifest_3.0.3.json)
+          MTA_CORE=$(jq -r '.artifacts.files.mta_core' manifests/release_manifest_3.0.3.json)
 
-          FILES=$(jq -r '.artifacts.files | .mta_core, .mta_et, .admin_ui' manifests/release_manifest_3.0.3.json)
-          TARGETS=$(jq -r '.targets.mta_core[].host' manifests/release_manifest_3.0.3.json | sort -u)
+          TARGETS=$(jq -r '.targets.mta_core[].host' manifests/release_manifest_3.0.3.json)
 
           for host in $TARGETS; do
-            echo ">>> Copying artifacts to $host (DRY RUN)"
+            echo ">>> Copying MTA artifact to $host"
 
             ssh rocky@$host "
               sudo mkdir -p ${STAGING_DIR}/${VERSION}
               sudo chown rocky:rocky ${STAGING_DIR}/${VERSION}
             "
 
-            for file in $FILES; do
-              echo "Copying $file to $host"
-              scp rocky@${RELEASE_HOST}:${RELEASE_PATH}/${file} \
-                  rocky@${host}:${STAGING_DIR}/${VERSION}/
-            done
+            scp rocky@${RELEASE_HOST}:${RELEASE_PATH}/${MTA_CORE} \
+                rocky@${host}:${STAGING_DIR}/${VERSION}/
+
+            ssh rocky@$host "ls -lh ${STAGING_DIR}/${VERSION}"
+          done
+        '''
+      }
+    }
+
+    stage('Copy ET Artifacts (ET Nodes Only)') {
+      steps {
+        sh '''
+          VERSION=$(jq -r '.version' manifests/release_manifest_3.0.3.json)
+          RELEASE_HOST=$(jq -r '.artifacts.release_server.host' manifests/release_manifest_3.0.3.json)
+          RELEASE_PATH=$(jq -r '.artifacts.release_server.path' manifests/release_manifest_3.0.3.json)
+          MTA_ET=$(jq -r '.artifacts.files.mta_et' manifests/release_manifest_3.0.3.json)
+
+          TARGETS=$(jq -r '.targets.mta_et[].host' manifests/release_manifest_3.0.3.json)
+
+          for host in $TARGETS; do
+            echo ">>> Copying ET artifact to $host"
 
             ssh rocky@$host "
-              echo '--- Files on $host ---'
-              ls -lh ${STAGING_DIR}/${VERSION}
+              sudo mkdir -p ${STAGING_DIR}/${VERSION}
+              sudo chown rocky:rocky ${STAGING_DIR}/${VERSION}
             "
+
+            scp rocky@${RELEASE_HOST}:${RELEASE_PATH}/${MTA_ET} \
+                rocky@${host}:${STAGING_DIR}/${VERSION}/
+
+            ssh rocky@$host "ls -lh ${STAGING_DIR}/${VERSION}"
+          done
+        '''
+      }
+    }
+
+    stage('Copy Admin UI Artifact (UI Node Only)') {
+      steps {
+        sh '''
+          VERSION=$(jq -r '.version' manifests/release_manifest_3.0.3.json)
+          RELEASE_HOST=$(jq -r '.artifacts.release_server.host' manifests/release_manifest_3.0.3.json)
+          RELEASE_PATH=$(jq -r '.artifacts.release_server.path' manifests/release_manifest_3.0.3.json)
+          UI_ZIP=$(jq -r '.artifacts.files.admin_ui' manifests/release_manifest_3.0.3.json)
+
+          TARGETS=$(jq -r '.targets.admin_ui[].host' manifests/release_manifest_3.0.3.json)
+
+          for host in $TARGETS; do
+            echo ">>> Copying Admin UI artifact to $host"
+
+            ssh rocky@$host "
+              sudo mkdir -p ${STAGING_DIR}/${VERSION}
+              sudo chown rocky:rocky ${STAGING_DIR}/${VERSION}
+            "
+
+            scp rocky@${RELEASE_HOST}:${RELEASE_PATH}/${UI_ZIP} \
+                rocky@${host}:${STAGING_DIR}/${VERSION}/
+
+            ssh rocky@$host "ls -lh ${STAGING_DIR}/${VERSION}"
           done
         '''
       }
@@ -79,10 +127,10 @@ EOF
 
   post {
     success {
-      echo "✅ DRY RUN artifact copy completed successfully"
+      echo "✅ DRY RUN artifact copy completed per node type"
     }
     failure {
-      echo "❌ Pipeline failed — no deployment actions taken"
+      echo "❌ Pipeline failed — no deployment actions executed"
     }
   }
 }
