@@ -26,12 +26,7 @@
       }
     ],
 
-    "mta_et": [
-      {
-        "host": "zemta-target",
-        "user": "rocky"
-      }
-    ],
+    "mta_et": [],
 
     "admin_ui": [
       {
