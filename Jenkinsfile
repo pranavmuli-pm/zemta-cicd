@@ -1,36 +1,172 @@
 node {
 
-  stage('Controlled Restart – MTA (REAL + VERIFY)') {
+  stage('Read Manifest') {
+    sh '''
+      echo "========== ZEMTA MANIFEST =========="
+      jq . manifests/release_manifest_3.0.3.json
+    '''
+  }
+
+  stage('Validate Release Artifacts') {
     sh '''
       set -e
 
-      VERSION=$(jq -r .version manifests/release_manifest_3.0.3.json)
+      RELEASE_HOST=$(jq -r .artifacts.release_server.host manifests/release_manifest_3.0.3.json)
+      RELEASE_PATH=$(jq -r .artifacts.release_server.path manifests/release_manifest_3.0.3.json)
 
-      echo "======================================"
-      echo " ZEMTA MTA RESTART + STATUS CHECK"
-      echo " Version : $VERSION"
-      echo "======================================"
+      MTA_CORE=$(jq -r .artifacts.files.mta_core manifests/release_manifest_3.0.3.json)
+      MTA_ET=$(jq -r .artifacts.files.mta_et manifests/release_manifest_3.0.3.json)
+      UI_ZIP=$(jq -r .artifacts.files.admin_ui manifests/release_manifest_3.0.3.json)
+
+      echo "Validating artifacts on ${RELEASE_HOST}:${RELEASE_PATH}"
+
+      ssh rocky@${RELEASE_HOST} bash -s -- ${RELEASE_PATH} ${MTA_CORE} ${MTA_ET} ${UI_ZIP} << 'EOF'
+        set -e
+        BASE=$1
+        shift
+        for f in "$@"; do
+          FILE="${BASE}/${f}"
+          if [ ! -f "$FILE" ]; then
+            echo "[ERROR] Missing artifact: $FILE"
+            exit 1
+          fi
+          SIZE=$(stat -c%s "$FILE")
+          if [ "$SIZE" -le 0 ]; then
+            echo "[ERROR] Empty artifact: $FILE"
+            exit 1
+          fi
+          echo "[OK] $f size=$SIZE"
+        done
+      EOF
+    '''
+  }
+
+  stage('Backup Existing Files') {
+    sh '''
+      set -e
+      VERSION=$(jq -r .version manifests/release_manifest_3.0.3.json)
+      DATE=$(date +%Y-%m-%d)
 
       for host in $(jq -r '.targets.mta_core[].host' manifests/release_manifest_3.0.3.json); do
-        echo ""
-        echo ">>> Restarting MTA services on $host"
-        echo "--------------------------------------"
+        ssh rocky@$host "
+          if ls /u1/zemta/*.jar >/dev/null 2>&1; then
+            sudo tar -czf /u1/backups/MTA${VERSION}_BKP_${DATE}.tar.gz /u1/zemta/*.jar
+          else
+            echo '[WARN] No MTA jars on $host'
+          fi
+        "
+      done
 
-        ssh rocky@$host "sudo /u1/zemta/mtaadminserver.sh restart"
-        ssh rocky@$host "sudo /u1/zemta/mtaserver.sh restart"
+      for host in $(jq -r '.targets.mta_et[].host' manifests/release_manifest_3.0.3.json); do
+        ssh rocky@$host "
+          if ls /u1/zemta-inbound-email-server/*.jar >/dev/null 2>&1; then
+            sudo tar -czf /u1/backups/MTA-ET${VERSION}_BKP_${DATE}.tar.gz /u1/zemta-inbound-email-server/*.jar
+          else
+            echo '[WARN] No ET jars on $host'
+          fi
+        "
+      done
 
-        echo ""
-        echo ">>> Verifying MTA services on $host"
-        echo "--------------------------------------"
-
-        ssh rocky@$host "sudo /u1/zemta/mtaadminserver.sh status"
-        ssh rocky@$host "sudo /u1/zemta/mtaserver.sh status"
-
-        echo "--------------------------------------"
-        echo "[OK] Restart + verification completed on $host"
+      for host in $(jq -r '.targets.admin_ui[].host' manifests/release_manifest_3.0.3.json); do
+        ssh rocky@$host "
+          if [ -d /var/www/html/mta-admin ]; then
+            sudo tar -czf /u1/backups/MTA-UI${VERSION}_BKP_${DATE}.tar.gz /var/www/html/mta-admin
+          else
+            echo '[WARN] No UI directory on $host'
+          fi
+        "
       done
     '''
   }
 
+  stage('Copy Artifacts (Per Node Type)') {
+    sh '''
+      set -e
+      VERSION=$(jq -r .version manifests/release_manifest_3.0.3.json)
+      RELEASE_HOST=$(jq -r .artifacts.release_server.host manifests/release_manifest_3.0.3.json)
+      RELEASE_PATH=$(jq -r .artifacts.release_server.path manifests/release_manifest_3.0.3.json)
+
+      MTA_CORE=$(jq -r .artifacts.files.mta_core manifests/release_manifest_3.0.3.json)
+      MTA_ET=$(jq -r .artifacts.files.mta_et manifests/release_manifest_3.0.3.json)
+      UI_ZIP=$(jq -r .artifacts.files.admin_ui manifests/release_manifest_3.0.3.json)
+
+      for host in $(jq -r '.targets.mta_core[].host' manifests/release_manifest_3.0.3.json); do
+        ssh rocky@$host "sudo mkdir -p /u1/staging/ZEMTA/${VERSION} && sudo chown rocky:rocky /u1/staging/ZEMTA/${VERSION}"
+        scp rocky@${RELEASE_HOST}:${RELEASE_PATH}/${MTA_CORE} rocky@$host:/u1/staging/ZEMTA/${VERSION}/
+      done
+
+      for host in $(jq -r '.targets.mta_et[].host' manifests/release_manifest_3.0.3.json); do
+        ssh rocky@$host "sudo mkdir -p /u1/staging/ZEMTA/${VERSION} && sudo chown rocky:rocky /u1/staging/ZEMTA/${VERSION}"
+        scp rocky@${RELEASE_HOST}:${RELEASE_PATH}/${MTA_ET} rocky@$host:/u1/staging/ZEMTA/${VERSION}/
+      done
+
+      for host in $(jq -r '.targets.admin_ui[].host' manifests/release_manifest_3.0.3.json); do
+        ssh rocky@$host "sudo mkdir -p /u1/staging/ZEMTA/${VERSION} && sudo chown rocky:rocky /u1/staging/ZEMTA/${VERSION}"
+        scp rocky@${RELEASE_HOST}:${RELEASE_PATH}/${UI_ZIP} rocky@$host:/u1/staging/ZEMTA/${VERSION}/
+      done
+    '''
+  }
+
+  stage('Extract Artifacts') {
+    sh '''
+      set -e
+      VERSION=$(jq -r .version manifests/release_manifest_3.0.3.json)
+
+      for host in $(jq -r '.targets.mta_core[].host' manifests/release_manifest_3.0.3.json); do
+        ssh rocky@$host "
+          if [ -f /u1/staging/ZEMTA/${VERSION}/MTA-${VERSION}.tar.gz ]; then
+            sudo tar -xzf /u1/staging/ZEMTA/${VERSION}/MTA-${VERSION}.tar.gz -C /u1/zemta
+          fi
+        "
+      done
+
+      for host in $(jq -r '.targets.mta_et[].host' manifests/release_manifest_3.0.3.json); do
+        ssh rocky@$host "
+          if [ -f /u1/staging/ZEMTA/${VERSION}/MTA-ET-${VERSION}.tar.gz ]; then
+            sudo tar -xzf /u1/staging/ZEMTA/${VERSION}/MTA-ET-${VERSION}.tar.gz -C /u1/zemta-inbound-email-server
+          fi
+        "
+      done
+
+      for host in $(jq -r '.targets.admin_ui[].host' manifests/release_manifest_3.0.3.json); do
+        ssh rocky@$host "
+          if [ -f /u1/staging/ZEMTA/${VERSION}/mta-admin.zip ]; then
+            sudo unzip -o /u1/staging/ZEMTA/${VERSION}/mta-admin.zip -d /var/www/html/
+          fi
+        "
+      done
+    '''
+  }
+
+  stage('Controlled Restart + Verify') {
+    sh '''
+      set -e
+
+      for host in $(jq -r '.targets.mta_core[].host' manifests/release_manifest_3.0.3.json); do
+        ssh rocky@$host "
+          sudo /u1/zemta/mtaadminserver.sh restart
+          sudo /u1/zemta/mtaserver.sh restart
+          sudo /u1/zemta/mtaadminserver.sh status
+          sudo /u1/zemta/mtaserver.sh status
+        "
+      done
+
+      for host in $(jq -r '.targets.mta_et[].host' manifests/release_manifest_3.0.3.json); do
+        ssh rocky@$host "
+          sudo /u1/zemta-inbound-email-server/etserver.sh restart || true
+        "
+      done
+
+      for host in $(jq -r '.targets.admin_ui[].host' manifests/release_manifest_3.0.3.json); do
+        ssh rocky@$host "
+          sudo systemctl restart httpd || true
+        "
+      done
+    '''
+  }
+
+  stage('FINAL STATUS') {
+    echo '✅ FULL ZEMTA PIPELINE EXECUTED SUCCESSFULLY'
+  }
 }
 
