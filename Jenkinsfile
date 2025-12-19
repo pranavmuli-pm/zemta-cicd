@@ -1,30 +1,30 @@
 node {
 
-    stage('Extract MTA Artifact (TEST ONLY)') {
+  stage('Controlled Restart – MTA (DRY RUN)') {
+    sh '''
+      set -e
 
-        sh '''
-          VERSION=$(jq -r .version manifests/release_manifest_3.0.3.json)
-          MTA_CORE=$(jq -r .artifacts.files.mta_core manifests/release_manifest_3.0.3.json)
+      VERSION=$(jq -r .version manifests/release_manifest_3.0.3.json)
 
-          echo "Version      : $VERSION"
-          echo "MTA artifact : $MTA_CORE"
+      echo "=============================="
+      echo " ZEMTA MTA RESTART (DRY RUN)"
+      echo " Version : $VERSION"
+      echo "=============================="
 
-          for host in $(jq -r '.targets.mta_core[].host' manifests/release_manifest_3.0.3.json); do
-            echo ">>> Extracting MTA on $host"
+      for host in $(jq -r '.targets.mta_core[].host' manifests/release_manifest_3.0.3.json); do
+        echo ""
+        echo ">>> DRY RUN on MTA node: $host"
+        echo "--------------------------------"
+        echo "Would execute:"
+        echo "  ssh rocky@$host sudo /u1/zemta/mtaadminserver.sh restart"
+        echo "  ssh rocky@$host sudo /u1/zemta/mtaserver.sh restart"
+        echo "--------------------------------"
+      done
 
-            ssh rocky@$host "
-              if [ -f /u1/staging/ZEMTA/$VERSION/$MTA_CORE ]; then
-                echo '[INFO] Artifact found, extracting...'
-                sudo tar -xzf /u1/staging/ZEMTA/$VERSION/$MTA_CORE -C /u1/zemta
-                echo '[OK] Extraction completed on $host'
-              else
-                echo '[ERROR] Artifact not found on $host'
-                exit 1
-              fi
-            "
-          done
-        '''
-    }
+      echo ""
+      echo "[DRY RUN COMPLETE] No services were restarted."
+    '''
+  }
 
 }
 
