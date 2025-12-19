@@ -1,32 +1,36 @@
-stage('Controlled Restart – MTA (REAL + VERIFY)') {
-  sh '''
-    set -e
+node {
 
-    VERSION=$(jq -r .version manifests/release_manifest_3.0.3.json)
+  stage('Controlled Restart – MTA (REAL + VERIFY)') {
+    sh '''
+      set -e
 
-    echo "======================================"
-    echo " ZEMTA MTA RESTART + STATUS CHECK"
-    echo " Version : $VERSION"
-    echo "======================================"
+      VERSION=$(jq -r .version manifests/release_manifest_3.0.3.json)
 
-    for host in $(jq -r '.targets.mta_core[].host' manifests/release_manifest_3.0.3.json); do
-      echo ""
-      echo ">>> Restarting MTA services on $host"
-      echo "--------------------------------------"
+      echo "======================================"
+      echo " ZEMTA MTA RESTART + STATUS CHECK"
+      echo " Version : $VERSION"
+      echo "======================================"
 
-      ssh rocky@$host "sudo /u1/zemta/mtaadminserver.sh restart"
-      ssh rocky@$host "sudo /u1/zemta/mtaserver.sh restart"
+      for host in $(jq -r '.targets.mta_core[].host' manifests/release_manifest_3.0.3.json); do
+        echo ""
+        echo ">>> Restarting MTA services on $host"
+        echo "--------------------------------------"
 
-      echo ""
-      echo ">>> Verifying MTA services on $host"
-      echo "--------------------------------------"
+        ssh rocky@$host "sudo /u1/zemta/mtaadminserver.sh restart"
+        ssh rocky@$host "sudo /u1/zemta/mtaserver.sh restart"
 
-      ssh rocky@$host "sudo /u1/zemta/mtaadminserver.sh status"
-      ssh rocky@$host "sudo /u1/zemta/mtaserver.sh status"
+        echo ""
+        echo ">>> Verifying MTA services on $host"
+        echo "--------------------------------------"
 
-      echo "--------------------------------------"
-      echo "[OK] Restart + verification completed on $host"
-    done
-  '''
+        ssh rocky@$host "sudo /u1/zemta/mtaadminserver.sh status"
+        ssh rocky@$host "sudo /u1/zemta/mtaserver.sh status"
+
+        echo "--------------------------------------"
+        echo "[OK] Restart + verification completed on $host"
+      done
+    '''
+  }
+
 }
 
