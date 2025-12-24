@@ -13,6 +13,13 @@ properties([
 
 node {
 
+  /* ===============================
+     ALWAYS CHECKOUT REPO FIRST
+     =============================== */
+  stage('Checkout SCM') {
+    checkout scm
+  }
+
   def MANIFEST = "manifests/release_manifest_${params.RELEASE_VERSION}.json"
   def DEPLOY_FAILED = false
 
@@ -20,6 +27,13 @@ node {
 
     stage('Manifest Check') {
       sh """
+        echo "Workspace location:"
+        pwd
+        echo "Listing workspace:"
+        ls -l
+        echo "Listing manifests directory:"
+        ls -l manifests || true
+
         echo "Using manifest: ${MANIFEST}"
         [ -f ${MANIFEST} ] || (echo '❌ Manifest not found' && exit 1)
       """
@@ -40,6 +54,8 @@ node {
         MTA_CORE=\$(jq -r .artifacts.files.mta_core ${MANIFEST})
         MTA_ET=\$(jq -r .artifacts.files.mta_et ${MANIFEST})
         UI_ZIP=\$(jq -r .artifacts.files.admin_ui ${MANIFEST})
+
+        echo "Validating artifacts on \$RELEASE_HOST:\$RELEASE_PATH"
 
         ssh rocky@\${RELEASE_HOST} "
           set -e
